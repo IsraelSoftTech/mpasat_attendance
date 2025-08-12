@@ -3,6 +3,7 @@
   display: flex;
   min-height: 100vh;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  overflow-x: hidden;
 }
 
 .sidebar {
@@ -79,9 +80,10 @@
 .main-content {
   flex: 1;
   margin-left: 280px;
-  background: #0f172a; /* blue-black */
+  background: #fff; /* blue-black */
   min-height: 100vh;
   transition: margin-left 0.3s ease;
+  overflow-x: hidden;
 }
 
 .top-header {
@@ -165,6 +167,8 @@
 
 .content {
   padding: 30px;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .content-section {
@@ -173,6 +177,7 @@
   padding: 30px;
   box-shadow: 0 5px 20px rgba(0, 0, 0, 0.05);
   animation: fadeIn 0.5s ease-out;
+  overflow-x: hidden;
 }
 
 @keyframes fadeIn {
@@ -215,6 +220,11 @@
   text-align: center;
   box-shadow: 0 10px 30px rgba(30, 58, 138, 0.2);
   transition: transform 0.3s ease;
+}
+
+/* Ensure all text inside cards is white */
+.stat-card * {
+  color: #ffffff !important;
 }
 
 .stat-card:hover {
@@ -276,6 +286,7 @@
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+  table-layout: auto;
 }
 
 .students-table th,
@@ -513,6 +524,8 @@
   
   .main-content {
     margin-left: 0;
+    width: 100%;
+    overflow-x: hidden;
   }
   
   .top-header {
@@ -521,10 +534,13 @@
   
   .content {
     padding: 20px;
+    width: 100%;
+    overflow-x: hidden;
   }
   
   .content-section {
     padding: 20px;
+    overflow-x: hidden;
   }
   
   .dashboard-stats {
@@ -533,11 +549,15 @@
   
   .students-table {
     font-size: 0.9rem;
+    display: block;
+    width: 100%;
+    overflow-x: auto;
   }
   
   .students-table th,
   .students-table td {
     padding: 10px;
+    white-space: nowrap;
   }
   
   .action-buttons {
@@ -592,4 +612,72 @@
   border-radius: 8px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.05);
   z-index: 90;
+} 
+
+/* Checkbox list styles */
+.checkbox-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+}
+
+.checkbox-item:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.checkbox-item:active {
+  transform: translateY(1px);
+}
+
+.checkbox-item input[type="checkbox"] {
+  transform: scale(1.1);
+  accent-color: #1e3a8a; /* modern browsers */
+}
+
+.checkbox-item span {
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.checkbox-item input[type="checkbox"]:checked + span {
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+/* Prefer parent styling when supported */
+.checkbox-item:has(input[type="checkbox"]:checked) {
+  background: #eef2ff;
+  border-color: #1e3a8a;
+} 
+
+/* Overlay shown only on mobile when sidebar is open */
+.sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 900; /* below sidebar (1000) */
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sidebar-overlay {
+    display: block;
+  }
 } 
