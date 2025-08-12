@@ -15,7 +15,8 @@ import {
   FiX,
   FiMenu,
   FiPrinter,
-  FiCheck
+  FiCheck,
+  FiBook
 } from 'react-icons/fi';
 import { ref, push, set, update, remove, onValue } from 'firebase/database';
 import Logo from '../assets/logo.png';
@@ -27,14 +28,18 @@ const Dashboard = () => {
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [showAddClassModal, setShowAddClassModal] = useState(false);
   const [showAddTeacherModal, setShowAddTeacherModal] = useState(false);
+  const [showAddSubjectModal, setShowAddSubjectModal] = useState(false);
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
+  const [subjects, setSubjects] = useState([]);
   const [editingStudent, setEditingStudent] = useState(null);
   const [editingClass, setEditingClass] = useState(null);
   const [editingTeacher, setEditingTeacher] = useState(null);
+  const [editingSubject, setEditingSubject] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
   const navigate = useNavigate();
 
   // Attendance states
@@ -42,17 +47,21 @@ const Dashboard = () => {
   const [attendanceType, setAttendanceType] = useState(''); // 'students' | 'teachers'
   const [attendanceForm, setAttendanceForm] = useState({
     classId: '',
+    subjectId: '',
     date: '', // YYYY-MM-DD
     time: '', // HH:mm
+    teacherName: '',
+    period: 'single', // 'single' | 'double'
     teacherId: '',
     status: 'P' // for teacher attendance only
   });
   const [attendanceMap, setAttendanceMap] = useState({}); // { studentId: 'P' | 'A' }
+  const [attendanceRecords, setAttendanceRecords] = useState([]); // For displaying attendance records
 
-  // Prefill student attendance when selecting date/time/class
+  // Prefill student attendance when selecting date/time/class/subject
   useEffect(() => {
-    if (attendanceType === 'students' && attendanceForm.classId && attendanceForm.date && attendanceForm.time) {
-      const path = `attendance/students/${attendanceForm.date}/${attendanceForm.classId}/${attendanceForm.time}`;
+    if (attendanceType === 'students' && attendanceForm.classId && attendanceForm.subjectId && attendanceForm.date && attendanceForm.time) {
+      const path = `attendance/students/${attendanceForm.date}/${attendanceForm.classId}/${attendanceForm.subjectId}/${attendanceForm.time}`;
       const r = ref(database, path);
       return onValue(r, (snap) => {
         const data = snap.val() || {};
@@ -60,12 +69,12 @@ const Dashboard = () => {
       });
     }
     return undefined;
-  }, [attendanceType, attendanceForm.classId, attendanceForm.date, attendanceForm.time]);
+  }, [attendanceType, attendanceForm.classId, attendanceForm.subjectId, attendanceForm.date, attendanceForm.time]);
 
   // Prefill teacher attendance
   useEffect(() => {
-    if (attendanceType === 'teachers' && attendanceForm.teacherId && attendanceForm.classId && attendanceForm.date && attendanceForm.time) {
-      const path = `attendance/teachers/${attendanceForm.date}/${attendanceForm.classId}/${attendanceForm.time}/${attendanceForm.teacherId}`;
+    if (attendanceType === 'teachers' && attendanceForm.teacherId && attendanceForm.classId && attendanceForm.subjectId && attendanceForm.date && attendanceForm.time) {
+      const path = `attendance/teachers/${attendanceForm.date}/${attendanceForm.classId}/${attendanceForm.subjectId}/${attendanceForm.time}/${attendanceForm.teacherId}`;
       const r = ref(database, path);
       return onValue(r, (snap) => {
         const data = snap.val();
@@ -75,27 +84,114 @@ const Dashboard = () => {
       });
     }
     return undefined;
-  }, [attendanceType, attendanceForm.teacherId, attendanceForm.classId, attendanceForm.date, attendanceForm.time]);
+  }, [attendanceType, attendanceForm.teacherId, attendanceForm.classId, attendanceForm.subjectId, attendanceForm.date, attendanceForm.time]);
+
+  // Load attendance records for display
+  useEffect(() => {
+    const recordsRef = ref(database, 'attendance');
+    return onValue(recordsRef, (snap) => {
+      const data = snap.val();
+      if (data) {
+        const records = [];
+        // Process students attendance
+        if (data.students) {
+          Object.entries(data.students).forEach(([date, classData]) => {
+            Object.entries(classData).forEach(([classId, subjectData]) => {
+              Object.entries(subjectData).forEach(([subjectId, timeData]) => {
+                Object.entries(timeData).forEach(([time, studentData]) => {
+                  const classItem = classes.find(c => c.id === classId);
+                  const subjectItem = subjects.find(s => s.id === subjectId);
+                  const presentCount = Object.values(studentData).filter(status => status === 'P').length;
+                  const totalCount = Object.keys(studentData).length;
+                  
+                  records.push({
+                    id: `${date}-${classId}-${subjectId}-${time}`,
+                    type: 'students',
+                    date,
+                    className: classItem ? classItem.className : classId,
+                    subjectName: subjectItem ? subjectItem.subjectName : subjectId,
+                    time,
+                    presentCount,
+                    totalCount,
+                    attendanceRate: totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0
+                  });
+                });
+              });
+            });
+          });
+        }
+        
+        // Process teachers attendance
+        if (data.teachers) {
+          Object.entries(data.teachers).forEach(([date, classData]) => {
+            Object.entries(classData).forEach(([classId, subjectData]) => {
+              Object.entries(subjectData).forEach(([subjectId, timeData]) => {
+                Object.entries(timeData).forEach(([time, teacherData]) => {
+                  const classItem = classes.find(c => c.id === classId);
+                  const subjectItem = subjects.find(s => s.id === subjectId);
+                  const presentCount = Object.values(teacherData).filter(status => status === 'P').length;
+                  const totalCount = Object.keys(teacherData).length;
+                  
+                  records.push({
+                    id: `${date}-${classId}-${subjectId}-${time}-teachers`,
+                    type: 'teachers',
+                    date,
+                    className: classItem ? classItem.className : classId,
+                    subjectName: subjectItem ? subjectItem.subjectName : subjectId,
+                    time,
+                    presentCount,
+                    totalCount,
+                    attendanceRate: totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0
+                  });
+                });
+              });
+            });
+          });
+        }
+        
+        setAttendanceRecords(records.sort((a, b) => new Date(b.date) - new Date(a.date)));
+      } else {
+        setAttendanceRecords([]);
+      }
+    });
+  }, [classes, subjects]);
 
   const openAttendance = () => {
     setAttendanceType('');
-    setAttendanceForm({ classId: '', date: '', time: '', teacherId: '', status: 'P' });
+    setAttendanceForm({ 
+      classId: '', 
+      subjectId: '', 
+      date: '', 
+      time: '', 
+      teacherName: '', 
+      period: 'single',
+      teacherId: '', 
+      status: 'P' 
+    });
     setAttendanceMap({});
     setShowAttendanceModal(true);
   };
 
   const saveStudentsAttendance = async () => {
-    const { classId, date, time } = attendanceForm;
-    if (!classId || !date || !time) {
-      alert('Please select class, date and time');
+    const { classId, subjectId, date, time, teacherName, period } = attendanceForm;
+    if (!classId || !subjectId || !date || !time || !teacherName) {
+      alert('Please complete all required fields');
       return;
     }
     const updates = {};
     Object.entries(attendanceMap).forEach(([studentId, status]) => {
       if (status === 'P' || status === 'A') {
-        updates[`attendance/students/${date}/${classId}/${time}/${studentId}`] = status;
+        updates[`attendance/students/${date}/${classId}/${subjectId}/${time}/${studentId}`] = status;
       }
     });
+    
+    // Save attendance metadata
+    updates[`attendance/students/${date}/${classId}/${subjectId}/${time}/_metadata`] = {
+      teacherName,
+      period,
+      timestamp: new Date().toISOString()
+    };
+    
     if (Object.keys(updates).length === 0) {
       alert('No attendance marked');
       return;
@@ -110,13 +206,13 @@ const Dashboard = () => {
   };
 
   const saveTeacherAttendance = async () => {
-    const { teacherId, classId, date, time, status } = attendanceForm;
-    if (!teacherId || !classId || !date || !time || !status) {
+    const { teacherId, classId, subjectId, date, time, status } = attendanceForm;
+    if (!teacherId || !classId || !subjectId || !date || !time || !status) {
       alert('Please complete all fields');
       return;
     }
     try {
-      await set(ref(database, `attendance/teachers/${date}/${classId}/${time}/${teacherId}`), status);
+      await set(ref(database, `attendance/teachers/${date}/${classId}/${subjectId}/${time}/${teacherId}`), status);
       showSuccess('Teacher attendance saved');
       setShowAttendanceModal(false);
     } catch (e) {
@@ -125,33 +221,39 @@ const Dashboard = () => {
   };
 
   // Reports state
+  const [reportType, setReportType] = useState('');
+  const [reportClass, setReportClass] = useState('');
+  const [reportSubject, setReportSubject] = useState('');
   const [reportDate, setReportDate] = useState('');
-  const [reportStudentData, setReportStudentData] = useState({}); // { classId: { time: { studentId: 'P'|'A' } } }
-  const [reportTeacherData, setReportTeacherData] = useState({}); // { classId: { time: { teacherId: 'P'|'A' } } }
+  const [reportStudentData, setReportStudentData] = useState({}); // { classId: { subjectId: { time: { studentId: 'P'|'A' } } } }
+  const [reportTeacherData, setReportTeacherData] = useState({}); // { classId: { subjectId: { time: { teacherId: 'P'|'A' } } } }
 
   useEffect(() => {
-    if (!reportDate) return;
-    const stdRef = ref(database, `attendance/students/${reportDate}`);
-    const tchRef = ref(database, `attendance/teachers/${reportDate}`);
-
-    const offStd = onValue(stdRef, (snap) => {
-      setReportStudentData(snap.val() || {});
-    });
-    const offTch = onValue(tchRef, (snap) => {
-      setReportTeacherData(snap.val() || {});
-    });
-    return () => { offStd(); offTch(); };
-  }, [reportDate]);
+    if (!reportType || !reportClass || !reportSubject || !reportDate) return;
+    
+    if (reportType === 'students') {
+      const stdRef = ref(database, `attendance/students/${reportDate}/${reportClass}/${reportSubject}`);
+      return onValue(stdRef, (snap) => {
+        setReportStudentData(snap.val() || {});
+      });
+    } else if (reportType === 'teachers') {
+      const tchRef = ref(database, `attendance/teachers/${reportDate}/${reportClass}/${reportSubject}`);
+      return onValue(tchRef, (snap) => {
+        setReportTeacherData(snap.val() || {});
+      });
+    }
+    return undefined;
+  }, [reportType, reportClass, reportSubject, reportDate]);
 
   // Helpers for reports
   const getTimesFromClassBucket = (bucket) => {
     if (!bucket) return [];
-    return Object.keys(bucket).sort();
+    return Object.keys(bucket).filter(key => key !== '_metadata').sort();
   };
 
-  const calculateMinutes = (marks) => {
+  const calculateMinutes = (marks, period = 'single') => {
     // marks: array of 'P' | 'A'
-    const minutesPerMark = 50;
+    const minutesPerMark = period === 'double' ? 100 : 50;
     let presentCount = 0;
     let absentCount = 0;
     marks.forEach(m => {
@@ -166,17 +268,19 @@ const Dashboard = () => {
   };
 
   const calculateTotalsForBucket = (bucket) => {
-    // bucket: { classId: { time: { entityId: 'P'|'A' } } }
+    // bucket: { classId: { subjectId: { time: { entityId: 'P'|'A' } } } }
     let presentCount = 0;
     let absentCount = 0;
-    Object.values(bucket || {}).forEach(timeBucket => {
-      Object.values(timeBucket || {}).forEach(entityMap => {
-        Object.values(entityMap || {}).forEach(mark => {
-          if (mark === 'P') presentCount += 1; else if (mark === 'A') absentCount += 1;
-        });
+    Object.values(bucket || {}).forEach(subjectBucket => {
+      Object.values(subjectBucket || {}).forEach(timeBucket => {
+        if (timeBucket && typeof timeBucket === 'object' && !timeBucket._metadata) {
+          Object.values(timeBucket).forEach(mark => {
+            if (mark === 'P') presentCount += 1; else if (mark === 'A') absentCount += 1;
+          });
+        }
       });
     });
-    const minutesPerMark = 50;
+    const minutesPerMark = 50; // Default to single period
     return {
       presentCount,
       absentCount,
@@ -209,6 +313,13 @@ const Dashboard = () => {
     classesTaught: []
   });
 
+  // Form states for subject
+  const [subjectForm, setSubjectForm] = useState({
+    subjectName: '',
+    abbreviation: '',
+    classId: ''
+  });
+
   useEffect(() => {
     // Get user email from localStorage
     const email = localStorage.getItem('userEmail');
@@ -222,6 +333,7 @@ const Dashboard = () => {
     const classesRef = ref(database, 'classes');
     const studentsRef = ref(database, 'students');
     const teachersRef = ref(database, 'teachers');
+    const subjectsRef = ref(database, 'subjects');
 
     const offClasses = onValue(classesRef, (snapshot) => {
       const data = snapshot.val();
@@ -247,10 +359,19 @@ const Dashboard = () => {
       setTeachers(list);
     });
 
+    const offSubjects = onValue(subjectsRef, (snapshot) => {
+      const data = snapshot.val();
+      const list = data
+        ? Object.entries(data).map(([id, value]) => ({ id, ...value }))
+        : [];
+      setSubjects(list);
+    });
+
     return () => {
       offClasses();
       offStudents();
       offTeachers();
+      offSubjects();
     };
   }, []);
 
@@ -483,8 +604,73 @@ const Dashboard = () => {
     }
   };
 
+  const handleAddSubject = () => {
+    setEditingSubject(null);
+    setSubjectForm({ subjectName: '', abbreviation: '', classId: '' });
+    setShowAddSubjectModal(true);
+  };
+
+  const handleEditSubject = (subject) => {
+    setEditingSubject(subject);
+    setSubjectForm({ 
+      subjectName: subject.subjectName, 
+      abbreviation: subject.abbreviation,
+      classId: subject.classId || ''
+    });
+    setShowAddSubjectModal(true);
+  };
+
+  const handleDeleteSubject = async (subjectId) => {
+    if (window.confirm('Are you sure you want to delete this subject?')) {
+      try {
+        await remove(ref(database, `subjects/${subjectId}`));
+        showSuccess('Subject deleted successfully');
+      } catch (e) {
+        console.error('Delete subject failed:', e);
+      }
+    }
+  };
+
+  const handleSaveSubject = async () => {
+    if (!subjectForm.subjectName || !subjectForm.abbreviation || !subjectForm.classId) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    try {
+      if (editingSubject) {
+        await update(ref(database, `subjects/${editingSubject.id}`), {
+          ...subjectForm,
+          updatedAt: new Date().toISOString()
+        });
+        showSuccess('Subject updated successfully');
+      } else {
+        const newRef = push(ref(database, 'subjects'));
+        await set(newRef, {
+          ...subjectForm,
+          id: newRef.key,
+          createdAt: new Date().toISOString()
+        });
+        showSuccess('Subject created successfully');
+      }
+
+      setShowAddSubjectModal(false);
+      setSubjectForm({ subjectName: '', abbreviation: '', classId: '' });
+      setEditingSubject(null);
+    } catch (e) {
+      console.error('Save subject failed:', e);
+    }
+  };
+
   const getClassName = (classId) => {
     const classItem = classes.find(c => c.id === classId);
+    return classItem ? classItem.className : 'Unknown Class';
+  };
+
+  const getSubjectClassName = (subjectId) => {
+    const subjectItem = subjects.find(s => s.id === subjectId);
+    if (!subjectItem || !subjectItem.classId) return 'No Class';
+    const classItem = classes.find(c => c.id === subjectItem.classId);
     return classItem ? classItem.className : 'Unknown Class';
   };
 
@@ -497,6 +683,7 @@ const Dashboard = () => {
   };
 
   const handlePrintClass = (classItem, classStudents) => {
+    setShowPrintPreview(true);
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
@@ -548,6 +735,7 @@ const Dashboard = () => {
       </html>
     `);
     printWindow.document.close();
+    setTimeout(() => setShowPrintPreview(false), 1000);
   };
 
   const handlePrintTeachers = () => {
@@ -630,8 +818,16 @@ const Dashboard = () => {
                 <p className="stat-number">{classes.length}</p>
               </div>
               <div className="stat-card">
-                <h3>Today's Attendance</h3>
-                <p className="stat-number">0%</p>
+                <h3>Total Subjects</h3>
+                <p className="stat-number">{subjects.length}</p>
+              </div>
+              <div className="stat-card">
+                <h3>Total Teachers</h3>
+                <p className="stat-number">{teachers.length}</p>
+              </div>
+              <div className="stat-card">
+                <h3>Total Attendance Records</h3>
+                <p className="stat-number">{attendanceRecords.length}</p>
               </div>
             </div>
           </div>
@@ -645,90 +841,90 @@ const Dashboard = () => {
                 <button className="add-student-btn" onClick={handleAddStudent}>
                   <FiPlus /> Add Student
                 </button>
-                <button className="add-student-btn" onClick={handleAddClass}>
-                  <FiPlus /> Add Class
-                </button>
               </div>
             </div>
 
             {classes.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                 <p>No classes available. Please add classes first to register students.</p>
-                <button className="add-student-btn" onClick={handleAddClass} style={{ marginTop: '20px' }}>
-                  <FiPlus /> Add Class
-                </button>
               </div>
             ) : (
               <>
-                {classes.sort((a, b) => a.className.localeCompare(b.className)).map(classItem => {
-                  const classStudents = students.filter(student => student.classId === classItem.id);
-                  
-                  return (
-                    <div key={classItem.id} style={{ marginBottom: '40px' }}>
-                      <div className="class-list-header" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'15px', flexWrap:'wrap' }}>
-                        <div>
-                          <h2>MPASAT CLASS LIST FOR {classItem.className.toUpperCase()}</h2>
-                          <p>2025/2026 ACADEMIC YEAR</p>
+                {showPrintPreview ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                    <p>Printing class list...</p>
+                  </div>
+                ) : (
+                  classes.sort((a, b) => a.className.localeCompare(b.className)).map(classItem => {
+                    const classStudents = students.filter(student => student.classId === classItem.id);
+                    
+                    return (
+                      <div key={classItem.id} style={{ marginBottom: '40px' }}>
+                        <div className="class-list-header" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'15px', flexWrap:'wrap' }}>
+                          <div>
+                            <h2>MPASAT CLASS LIST FOR {classItem.className.toUpperCase()}</h2>
+                            <p>2025/2026 ACADEMIC YEAR</p>
+                          </div>
+                          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
+                            <button className="print-btn" onClick={() => handlePrintClass(classItem, classStudents)}>
+                              <FiPrinter /> Print Class List
+                            </button>
+                            <button className="edit-btn" onClick={() => handleEditClass(classItem)}>
+                              <FiEdit2 />
+                            </button>
+                            <button className="delete-btn" onClick={() => handleDeleteClass(classItem.id)}>
+                              <FiTrash2 />
+                            </button>
+                          </div>
                         </div>
-                        <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
-                          <button className="print-btn" onClick={() => handlePrintClass(classItem, classStudents)}>
-                            <FiPrinter /> Print Class List
-                          </button>
-                          <button className="edit-btn" onClick={() => handleEditClass(classItem)}>
-                            <FiEdit2 />
-                          </button>
-                          <button className="delete-btn" onClick={() => handleDeleteClass(classItem.id)}>
-                            <FiTrash2 />
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {classStudents.length === 0 ? (
-                        <p style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
-                          No students registered in this class yet.
-                        </p>
-                      ) : (
-                        <table className="students-table">
-                          <thead>
-                            <tr>
-                              <th>S/N</th>
-                              <th>Full Names</th>
-                              <th>Sex</th>
-                              <th>Date of Birth</th>
-                              <th>Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {classStudents.map((student, index) => (
-                              <tr key={student.id}>
-                                <td>{index + 1}</td>
-                                <td>{student.fullName}</td>
-                                <td>{student.sex}</td>
-                                <td>{formatDate(student.dateOfBirth)}</td>
-                                <td>
-                                  <div className="action-buttons">
-                                    <button 
-                                      className="edit-btn" 
-                                      onClick={() => handleEditStudent(student)}
-                                    >
-                                      <FiEdit2 />
-                                    </button>
-                                    <button 
-                                      className="delete-btn" 
-                                      onClick={() => handleDeleteStudent(student.id)}
-                                    >
-                                      <FiTrash2 />
-                                    </button>
-                                  </div>
-                                </td>
+                        
+                        {classStudents.length === 0 ? (
+                          <p style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+                            No students registered in this class yet.
+                          </p>
+                        ) : (
+                          <table className="students-table">
+                            <thead>
+                              <tr>
+                                <th>S/N</th>
+                                <th>Full Names</th>
+                                <th>Sex</th>
+                                <th>Date of Birth</th>
+                                <th>Actions</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  );
-                })}
+                            </thead>
+                            <tbody>
+                              {classStudents.map((student, index) => (
+                                <tr key={student.id}>
+                                  <td>{index + 1}</td>
+                                  <td>{student.fullName}</td>
+                                  <td>{student.sex}</td>
+                                  <td>{formatDate(student.dateOfBirth)}</td>
+                                  <td>
+                                    <div className="action-buttons">
+                                      <button 
+                                        className="edit-btn" 
+                                        onClick={() => handleEditStudent(student)}
+                                      >
+                                        <FiEdit2 />
+                                      </button>
+                                      <button 
+                                        className="delete-btn" 
+                                        onClick={() => handleDeleteStudent(student.id)}
+                                      >
+                                        <FiTrash2 />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </>
             )}
           </div>
@@ -787,6 +983,104 @@ const Dashboard = () => {
             )}
           </div>
         );
+      case 'subjects':
+        return (
+          <div className="content-section">
+            <div className="students-header">
+              <h2>Class & Subjects Management</h2>
+              <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
+                <button className="add-student-btn" onClick={handleAddClass}>
+                  <FiPlus /> Add Class
+                </button>
+                <button className="add-student-btn" onClick={handleAddSubject}>
+                  <FiPlus /> Add Subject
+                </button>
+              </div>
+            </div>
+
+            {/* Classes Section */}
+            <div style={{ marginBottom: '40px' }}>
+              <h3 style={{ marginBottom: '20px', color: '#1e3a8a', borderBottom: '2px solid #e1e5e9', paddingBottom: '10px' }}>
+                Classes
+              </h3>
+              {classes.length === 0 ? (
+                <p style={{ textAlign: 'center', padding: '20px', color: '#666' }}>No classes added yet.</p>
+              ) : (
+                <table className="students-table">
+                  <thead>
+                    <tr>
+                      <th>S/N</th>
+                      <th>Class Name</th>
+                      <th>Abbreviation</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {classes.map((c, index) => (
+                      <tr key={c.id}>
+                        <td>{index + 1}</td>
+                        <td>{c.className}</td>
+                        <td>{c.abbreviation}</td>
+                        <td>
+                          <div className="action-buttons">
+                            <button className="edit-btn" onClick={() => handleEditClass(c)}>
+                              <FiEdit2 />
+                            </button>
+                            <button className="delete-btn" onClick={() => handleDeleteClass(c.id)}>
+                              <FiTrash2 />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Subjects Section */}
+            <div>
+              <h3 style={{ marginBottom: '20px', color: '#1e3a8a', borderBottom: '2px solid #e1e5e9', paddingBottom: '10px' }}>
+                Subjects
+              </h3>
+              {subjects.length === 0 ? (
+                <p style={{ textAlign: 'center', padding: '20px', color: '#666' }}>No subjects added yet.</p>
+              ) : (
+                <table className="students-table">
+                  <thead>
+                    <tr>
+                      <th>S/N</th>
+                      <th>Subject Name</th>
+                      <th>Abbreviation</th>
+                      <th>Class</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subjects.map((s, index) => (
+                      <tr key={s.id}>
+                        <td>{index + 1}</td>
+                        <td>{s.subjectName}</td>
+                        <td>{s.abbreviation}</td>
+                        <td>{getSubjectClassName(s.id)}</td>
+                        <td>
+                          <div className="action-buttons">
+                            <button className="edit-btn" onClick={() => handleEditSubject(s)}>
+                              <FiEdit2 />
+                            </button>
+                            <button className="delete-btn" onClick={() => handleDeleteSubject(s.id)}>
+                              <FiTrash2 />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        );
       case 'attendance':
         return (
           <div className="content-section">
@@ -796,12 +1090,69 @@ const Dashboard = () => {
               <button className="add-student-btn" onClick={openAttendance}>
                 <FiPlus /> Take Attendance
               </button>
-              <button className="print-btn" onClick={() => handlePrintReport(new Date().toISOString().slice(0,10))}>
-                <FiPrinter /> Print Today's Report
-              </button>
               <button className="delete-btn" onClick={handleDeleteAllAttendance}>
                 <FiTrash2 /> Delete All
               </button>
+            </div>
+            
+            {/* Attendance Records Table */}
+            <div style={{ marginTop: '30px' }}>
+              <h3 style={{ marginBottom: '20px', color: '#1e3a8a' }}>Attendance Records</h3>
+              {attendanceRecords.length === 0 ? (
+                <p style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+                  No attendance records found. Take attendance to see records here.
+                </p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="students-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Class</th>
+                        <th>Subject</th>
+                        <th>Time</th>
+                        <th>Present</th>
+                        <th>Total</th>
+                        <th>Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {attendanceRecords.map((record) => (
+                        <tr key={record.id}>
+                          <td>{formatDate(record.date)}</td>
+                          <td>
+                            <span style={{ 
+                              padding: '4px 8px', 
+                              borderRadius: '4px', 
+                              fontSize: '0.8rem',
+                              fontWeight: '600',
+                              backgroundColor: record.type === 'students' ? '#dbeafe' : '#fef3c7',
+                              color: record.type === 'students' ? '#1e40af' : '#d97706'
+                            }}>
+                              {record.type === 'students' ? 'Students' : 'Teachers'}
+                            </span>
+                          </td>
+                          <td>{record.className}</td>
+                          <td>{record.subjectName}</td>
+                          <td>{record.time}</td>
+                          <td>{record.presentCount}</td>
+                          <td>{record.totalCount}</td>
+                          <td>
+                            <span style={{ 
+                              fontWeight: '600',
+                              color: record.attendanceRate >= 80 ? '#16a34a' : 
+                                     record.attendanceRate >= 60 ? '#d97706' : '#dc2626'
+                            }}>
+                              {record.attendanceRate}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -811,7 +1162,51 @@ const Dashboard = () => {
             <h2>Reports</h2>
             <div className="students-header" style={{ marginBottom: 20 }}>
               <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
-                <label style={{ fontWeight:600 }}>Select Date</label>
+                <label style={{ fontWeight:600 }}>Select Report Type</label>
+                <select value={reportType} onChange={(e) => setReportType(e.target.value)}>
+                  <option value="">Select report type</option>
+                  <option value="students">Students Attendance</option>
+                  <option value="teachers">Teachers Attendance</option>
+                </select>
+                {reportType === 'students' && (
+                  <>
+                    <label style={{ fontWeight:600 }}>Select Class</label>
+                    <select value={reportClass} onChange={(e) => setReportClass(e.target.value)}>
+                      <option value="">Select class</option>
+                      {classes.sort((a, b) => a.className.localeCompare(b.className)).map(c => (
+                        <option key={c.id} value={c.id}>{c.className} ({c.abbreviation})</option>
+                      ))}
+                    </select>
+                    <label style={{ fontWeight:600 }}>Select Subject</label>
+                    <select value={reportSubject} onChange={(e) => setReportSubject(e.target.value)}>
+                      <option value="">Select subject</option>
+                      {subjects.sort((a, b) => a.subjectName.localeCompare(b.subjectName)).map(s => (
+                        <option key={s.id} value={s.id}>{s.subjectName}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                {reportType === 'teachers' && (
+                  <>
+                    <label style={{ fontWeight:600 }}>Select Class</label>
+                    <select value={reportClass} onChange={(e) => setReportClass(e.target.value)}>
+                      <option value="">Select class</option>
+                      {classes.sort((a, b) => a.className.localeCompare(b.className)).map(c => (
+                        <option key={c.id} value={c.id}>{c.className} ({c.abbreviation})</option>
+                      ))}
+                    </select>
+                    <label style={{ fontWeight:600 }}>Select Subject</label>
+                    <select value={reportSubject} onChange={(e) => setReportSubject(e.target.value)}>
+                      <option value="">Select subject</option>
+                      {subjects.sort((a, b) => a.subjectName.localeCompare(b.subjectName)).map(s => (
+                        <option key={s.id} value={s.id}>{s.subjectName}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                {reportType && reportClass && reportSubject && (
+                  <label style={{ fontWeight:600 }}>Select Date</label>
+                )}
                 <input type="date" value={reportDate} onChange={(e)=> setReportDate(e.target.value)} />
                 {reportDate && (
                   <button className="print-btn" onClick={() => handlePrintReport(reportDate)}>
@@ -860,14 +1255,15 @@ const Dashboard = () => {
                     {Object.keys(reportStudentData).length === 0 ? (
                       <p style={{ color:'#64748b' }}>No student attendance recorded for this date.</p>
                     ) : (
-                      Object.entries(reportStudentData).map(([classId, timeBucket]) => {
+                      Object.entries(reportStudentData).map(([classId, subjectBucket]) => {
                         const classItem = classes.find(c => c.id === classId);
-                        const times = getTimesFromClassBucket(timeBucket);
+                        const subjectItem = subjects.find(s => s.id === Object.keys(subjectBucket)[0]); // Get the first subject for the class
+                        const times = getTimesFromClassBucket(Object.values(subjectBucket)[0]); // Get times for the first subject
                         const classStudents = students.filter(s => s.classId === classId);
                         return (
                           <div key={classId} style={{ marginBottom: 24 }}>
                             <div className="class-list-header">
-                              <h2>{classItem ? classItem.className : classId}</h2>
+                              <h2>{classItem ? classItem.className : classId} - {subjectItem ? subjectItem.subjectName : Object.keys(subjectBucket)[0]}</h2>
                               <p>Attendance matrix across times</p>
                             </div>
                             <div style={{ overflowX:'auto' }}>
@@ -882,14 +1278,14 @@ const Dashboard = () => {
                                 </thead>
                                 <tbody>
                                   {classStudents.map(st => {
-                                    const marks = times.map(t => (timeBucket?.[t]?.[st.id] || ''));
+                                    const marks = times.map(t => (Object.values(subjectBucket)?.[0]?.[t]?.[st.id] || ''));
                                     const { presentMinutes, absentMinutes } = calculateMinutes(marks);
                                     return (
                                       <tr key={st.id}>
                                         <td>{st.fullName}</td>
                                         {times.map(t => (
-                                          <td key={t} style={{ fontWeight:600, color: (timeBucket?.[t]?.[st.id] === 'P') ? '#16a34a' : (timeBucket?.[t]?.[st.id] === 'A') ? '#dc2626' : '#64748b' }}>
-                                            {timeBucket?.[t]?.[st.id] || '-'}
+                                          <td key={t} style={{ fontWeight:600, color: (Object.values(subjectBucket)?.[0]?.[t]?.[st.id] === 'P') ? '#16a34a' : (Object.values(subjectBucket)?.[0]?.[t]?.[st.id] === 'A') ? '#dc2626' : '#64748b' }}>
+                                            {Object.values(subjectBucket)?.[0]?.[t]?.[st.id] || '-'}
                                           </td>
                                         ))}
                                         <td>{presentMinutes}</td>
@@ -912,16 +1308,17 @@ const Dashboard = () => {
                     {Object.keys(reportTeacherData).length === 0 ? (
                       <p style={{ color:'#64748b' }}>No teacher attendance recorded for this date.</p>
                     ) : (
-                      Object.entries(reportTeacherData).map(([classId, timeBucket]) => {
+                      Object.entries(reportTeacherData).map(([classId, subjectBucket]) => {
                         const classItem = classes.find(c => c.id === classId);
-                        const times = getTimesFromClassBucket(timeBucket);
+                        const subjectItem = subjects.find(s => s.id === Object.keys(subjectBucket)[0]); // Get the first subject for the class
+                        const times = getTimesFromClassBucket(Object.values(subjectBucket)[0]); // Get times for the first subject
                         const teacherIdsSet = new Set();
-                        times.forEach(t => Object.keys(timeBucket?.[t] || {}).forEach(id => teacherIdsSet.add(id)));
+                        times.forEach(t => Object.keys(Object.values(subjectBucket)?.[0]?.[t] || {}).forEach(id => teacherIdsSet.add(id)));
                         const teacherIds = Array.from(teacherIdsSet);
                         return (
                           <div key={classId} style={{ marginBottom: 24 }}>
                             <div className="class-list-header">
-                              <h2>{classItem ? classItem.className : classId}</h2>
+                              <h2>{classItem ? classItem.className : classId} - {subjectItem ? subjectItem.subjectName : Object.keys(subjectBucket)[0]}</h2>
                               <p>Teachers attendance across times</p>
                             </div>
                             <div style={{ overflowX:'auto' }}>
@@ -937,14 +1334,14 @@ const Dashboard = () => {
                                 <tbody>
                                   {teacherIds.map(tid => {
                                     const tch = teachers.find(tt => tt.id === tid);
-                                    const marks = times.map(t => (timeBucket?.[t]?.[tid] || '')); 
+                                    const marks = times.map(t => (Object.values(subjectBucket)?.[0]?.[t]?.[tid] || '')); 
                                     const { presentMinutes, absentMinutes } = calculateMinutes(marks);
                                     return (
                                       <tr key={tid}>
                                         <td>{tch ? tch.name : tid}</td>
                                         {times.map(t => (
-                                          <td key={t} style={{ fontWeight:600, color: (timeBucket?.[t]?.[tid] === 'P') ? '#16a34a' : (timeBucket?.[t]?.[tid] === 'A') ? '#dc2626' : '#64748b' }}>
-                                            {timeBucket?.[t]?.[tid] || '-'}
+                                          <td key={t} style={{ fontWeight:600, color: (Object.values(subjectBucket)?.[0]?.[t]?.[tid] === 'P') ? '#16a34a' : (Object.values(subjectBucket)?.[0]?.[t]?.[tid] === 'A') ? '#dc2626' : '#64748b' }}>
+                                            {Object.values(subjectBucket)?.[0]?.[t]?.[tid] || '-'}
                                           </td>
                                         ))}
                                         <td>{presentMinutes}</td>
@@ -984,25 +1381,28 @@ const Dashboard = () => {
     // Students grid per class
     const renderStudentsGrid = () => {
       if (!reportStudentData || Object.keys(reportStudentData).length === 0) return '<p>No student attendance.</p>';
-      return Object.entries(reportStudentData).map(([classId, timeBucket]) => {
-        const classItem = classes.find(c => c.id === classId);
-        const times = Object.keys(timeBucket || {}).sort();
-        const classStudents = students.filter(s => s.classId === classId);
-        const header = ['Student', ...times, 'Present (mins)', 'Absent (mins)'];
-        const rows = classStudents.map(st => {
-          const marks = times.map(t => (timeBucket?.[t]?.[st.id] || ''));
-          const { presentMinutes, absentMinutes } = calculateMinutes(marks);
-          const cells = [st.fullName, ...marks.map(m => m || '-'), String(presentMinutes), String(absentMinutes)];
-          return `<tr>${cells.map(c => `<td style="padding:6px;border:1px solid #ddd;">${c}</td>`).join('')}</tr>`;
+      return Object.entries(reportStudentData).map(([time, studentData]) => {
+        const classItem = classes.find(c => c.id === reportClass);
+        const subjectItem = subjects.find(s => s.id === reportSubject);
+        const metadata = studentData._metadata || {};
+        const header = ['Student', 'Status', 'Minutes'];
+        const rows = Object.entries(studentData).filter(([key]) => key !== '_metadata').map(([studentId, status]) => {
+          const student = students.find(s => s.id === studentId);
+          const minutes = status === 'P' ? (metadata.period === 'double' ? 100 : 50) : 0;
+          return `<tr><td style="padding:6px;border:1px solid #ddd;">${student ? student.fullName : studentId}</td><td style="padding:6px;border:1px solid #ddd;">${status}</td><td style="padding:6px;border:1px solid #ddd;">${minutes}</td></tr>`;
         }).join('');
+        
         return `
           <div style="margin: 16px 0;">
             <div style="padding:10px 12px;background:#1e3a8a;color:#fff;border-radius:8px;display:flex;justify-content:space-between;">
-              <strong>${classItem ? classItem.className : classId}</strong>
-              <span>Students</span>
+              <strong>${classItem ? classItem.className : reportClass} - ${subjectItem ? subjectItem.subjectName : reportSubject}</strong>
+              <span>Time: ${time}</span>
+            </div>
+            <div style="padding:8px;background:#f8fafc;border-radius:4px;margin:8px 0;">
+              <strong>Teacher:</strong> ${metadata.teacherName || 'N/A'} | <strong>Period:</strong> ${metadata.period === 'double' ? 'Double (100 mins)' : 'Single (50 mins)'}
             </div>
             <div style="overflow-x:auto;">
-              <table style="width:100%;border-collapse:collapse;margin-top:8px;min-width:700px;">
+              <table style="width:100%;border-collapse:collapse;margin-top:8px;">
                 <thead><tr>${header.map(h => `<th style="background:#f8fafc;text-align:left;padding:8px;border:1px solid #e5e7eb;">${h}</th>`).join('')}</tr></thead>
                 <tbody>${rows}</tbody>
               </table>
@@ -1015,28 +1415,24 @@ const Dashboard = () => {
     // Teachers grid per class
     const renderTeachersGrid = () => {
       if (!reportTeacherData || Object.keys(reportTeacherData).length === 0) return '<p>No teacher attendance.</p>';
-      return Object.entries(reportTeacherData).map(([classId, timeBucket]) => {
-        const classItem = classes.find(c => c.id === classId);
-        const times = Object.keys(timeBucket || {}).sort();
-        const teacherIdsSet = new Set();
-        times.forEach(t => Object.keys(timeBucket?.[t] || {}).forEach(id => teacherIdsSet.add(id)));
-        const teacherIds = Array.from(teacherIdsSet);
-        const header = ['Teacher', ...times, 'Present (mins)', 'Absent (mins)'];
-        const rows = teacherIds.map(tid => {
-          const tch = teachers.find(tt => tt.id === tid);
-          const marks = times.map(t => (timeBucket?.[t]?.[tid] || ''));
-          const { presentMinutes, absentMinutes } = calculateMinutes(marks);
-          const cells = [tch ? tch.name : tid, ...marks.map(m => m || '-'), String(presentMinutes), String(absentMinutes)];
-          return `<tr>${cells.map(c => `<td style="padding:6px;border:1px solid #ddd;">${c}</td>`).join('')}</tr>`;
+      return Object.entries(reportTeacherData).map(([time, teacherData]) => {
+        const classItem = classes.find(c => c.id === reportClass);
+        const subjectItem = subjects.find(s => s.id === reportSubject);
+        const header = ['Teacher', 'Status', 'Minutes'];
+        const rows = Object.entries(teacherData).map(([teacherId, status]) => {
+          const teacher = teachers.find(t => t.id === teacherId);
+          const minutes = status === 'P' ? 50 : 0; // Teachers default to single period
+          return `<tr><td style="padding:6px;border:1px solid #ddd;">${teacher ? teacher.name : teacherId}</td><td style="padding:6px;border:1px solid #ddd;">${status}</td><td style="padding:6px;border:1px solid #ddd;">${minutes}</td></tr>`;
         }).join('');
+        
         return `
           <div style="margin: 16px 0;">
             <div style="padding:10px 12px;background:#1e3a8a;color:#fff;border-radius:8px;display:flex;justify-content:space-between;">
-              <strong>${classItem ? classItem.className : classId}</strong>
-              <span>Teachers</span>
+              <strong>${classItem ? classItem.className : reportClass} - ${subjectItem ? subjectItem.subjectName : reportSubject}</strong>
+              <span>Time: ${time}</span>
             </div>
             <div style="overflow-x:auto;">
-              <table style="width:100%;border-collapse:collapse;margin-top:8px;min-width:700px;">
+              <table style="width:100%;border-collapse:collapse;margin-top:8px;">
                 <thead><tr>${header.map(h => `<th style="background:#f8fafc;text-align:left;padding:8px;border:1px solid #e5e7eb;">${h}</th>`).join('')}</tr></thead>
                 <tbody>${rows}</tbody>
               </table>
@@ -1046,24 +1442,30 @@ const Dashboard = () => {
       }).join('');
     };
 
+    const classItem = classes.find(c => c.id === reportClass);
+    const subjectItem = subjects.find(s => s.id === reportSubject);
+    const reportTitle = `${reportType === 'students' ? 'Students' : 'Teachers'} Attendance Report`;
+    const subtitle = `${classItem ? classItem.className : reportClass} - ${subjectItem ? subjectItem.subjectName : reportSubject} - ${date}`;
+
     printWindow.document.write(`
       <html>
         <head>
-          <title>Attendance Report - ${date}</title>
+          <title>${reportTitle} - ${date}</title>
           <style>
             body { font-family: Segoe UI, Tahoma, Geneva, Verdana, sans-serif; padding: 20px; }
             .header { text-align:center; margin-bottom: 10px; }
             .header img { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; }
             .title { color: #1e3a8a; margin: 10px 0 0 0; }
+            .subtitle { color: #64748b; margin: 5px 0 20px 0; font-size: 1.1rem; }
           </style>
         </head>
         <body>
           <div class="header">
             <img src="${Logo}" />
-            <h2 class="title">MPASAT Attendance Report - ${date}</h2>
+            <h2 class="title">MPASAT ${reportTitle}</h2>
+            <p class="subtitle">${subtitle}</p>
           </div>
-          ${formatTable('Students', renderStudentsGrid())}
-          ${formatTable('Teachers', renderTeachersGrid())}
+          ${reportType === 'students' ? formatTable('Students', renderStudentsGrid()) : formatTable('Teachers', renderTeachersGrid())}
           <script>
             window.onload = function() { window.print(); setTimeout(() => window.close(), 300); };
           </script>
@@ -1117,6 +1519,14 @@ const Dashboard = () => {
           >
             <FiUserCheck className="nav-icon" />
             Teachers
+          </button>
+
+          <button
+            className={`nav-item ${activeMenu === 'subjects' ? 'active' : ''}`}
+            onClick={() => handleMenuClick('subjects')}
+          >
+            <FiBook className="nav-icon" />
+            Class & Subjects
           </button>
           
           <button
@@ -1396,6 +1806,69 @@ const Dashboard = () => {
         </div>
       )}
 
+      {/* Add/Edit Subject Modal */}
+      {showAddSubjectModal && (
+        <div className="modal-overlay" onClick={() => setShowAddSubjectModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{editingSubject ? 'Edit Subject' : 'Add New Subject'}</h3>
+              <button className="close-btn" onClick={() => setShowAddSubjectModal(false)}>
+                <FiX />
+              </button>
+            </div>
+            
+            <form className="modal-form" onSubmit={(e) => { e.preventDefault(); handleSaveSubject(); }}>
+              <div className="form-group">
+                <label>Subject Name</label>
+                <input
+                  type="text"
+                  value={subjectForm.subjectName}
+                  onChange={(e) => setSubjectForm({...subjectForm, subjectName: e.target.value})}
+                  placeholder="Enter subject name"
+                  required
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Abbreviation</label>
+                <input
+                  type="text"
+                  value={subjectForm.abbreviation}
+                  onChange={(e) => setSubjectForm({...subjectForm, abbreviation: e.target.value})}
+                  placeholder="Enter abbreviation"
+                  required
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Class</label>
+                <select
+                  value={subjectForm.classId}
+                  onChange={(e) => setSubjectForm({...subjectForm, classId: e.target.value})}
+                  required
+                >
+                  <option value="">Select class</option>
+                  {classes.sort((a, b) => a.className.localeCompare(b.className)).map(classItem => (
+                    <option key={classItem.id} value={classItem.id}>
+                      {classItem.className} ({classItem.abbreviation})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="modal-actions">
+                <button type="button" className="cancel-btn" onClick={() => setShowAddSubjectModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="save-btn">
+                  {editingSubject ? 'Update Subject' : 'Add Subject'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Attendance Modal */}
       {showAttendanceModal && (
         <div className="modal-overlay" onClick={() => setShowAttendanceModal(false)}>
@@ -1411,7 +1884,16 @@ const Dashboard = () => {
               {/* Step 1: Type */}
               <div className="form-group">
                 <label>Attendance Type</label>
-                <select value={attendanceType} onChange={(e)=> { setAttendanceType(e.target.value); setAttendanceForm({ classId:'', date:'', time:'', teacherId:'', status:'P' }); setAttendanceMap({}); }}>
+                <select value={attendanceType} onChange={(e)=> { setAttendanceType(e.target.value); setAttendanceForm({ 
+                  classId: '', 
+                  subjectId: '', 
+                  date: '', 
+                  time: '', 
+                  teacherName: '', 
+                  period: 'single',
+                  teacherId: '', 
+                  status: 'P' 
+                }); setAttendanceMap({}); }}>
                   <option value="">Select type</option>
                   <option value="students">Students</option>
                   <option value="teachers">Teachers</option>
@@ -1430,6 +1912,35 @@ const Dashboard = () => {
                       ))}
                     </select>
                   </div>
+                  {/* Subject */}
+                  <div className="form-group">
+                    <label>Subject</label>
+                    <select value={attendanceForm.subjectId} onChange={(e)=> setAttendanceForm(prev => ({ ...prev, subjectId: e.target.value }))}>
+                      <option value="">Select subject</option>
+                      {subjects.sort((a,b)=>a.subjectName.localeCompare(b.subjectName)).map(s => (
+                        <option key={s.id} value={s.id}>{s.subjectName}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* Teacher Name */}
+                  <div className="form-group">
+                    <label>Teacher Name</label>
+                    <input
+                      type="text"
+                      value={attendanceForm.teacherName}
+                      onChange={(e) => setAttendanceForm(prev => ({ ...prev, teacherName: e.target.value }))}
+                      placeholder="Enter teacher name"
+                      required
+                    />
+                  </div>
+                  {/* Period */}
+                  <div className="form-group">
+                    <label>Period</label>
+                    <select value={attendanceForm.period} onChange={(e) => setAttendanceForm(prev => ({ ...prev, period: e.target.value }))}>
+                      <option value="single">Single (50 minutes)</option>
+                      <option value="double">Double (100 minutes)</option>
+                    </select>
+                  </div>
                   {/* Date & Time */}
                   <div className="form-row">
                     <div className="form-group">
@@ -1443,7 +1954,7 @@ const Dashboard = () => {
                   </div>
 
                   {/* Students sheet */}
-                  {attendanceForm.classId && attendanceForm.date && attendanceForm.time && (
+                  {attendanceForm.classId && attendanceForm.subjectId && attendanceForm.date && attendanceForm.time && (
                     <div>
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 10 }}>
                         <strong>Mark Attendance</strong>
@@ -1498,7 +2009,7 @@ const Dashboard = () => {
 
                   <div className="modal-actions">
                     <button className="cancel-btn" onClick={() => setShowAttendanceModal(false)}>Cancel</button>
-                    <button className="save-btn" onClick={saveStudentsAttendance} disabled={!(attendanceForm.classId && attendanceForm.date && attendanceForm.time)}>Save Attendance</button>
+                    <button className="save-btn" onClick={saveStudentsAttendance} disabled={!(attendanceForm.classId && attendanceForm.subjectId && attendanceForm.teacherName && attendanceForm.date && attendanceForm.time)}>Save Attendance</button>
                   </div>
                 </>
               )}
@@ -1525,6 +2036,16 @@ const Dashboard = () => {
                       ))}
                     </select>
                   </div>
+                  {/* Subject */}
+                  <div className="form-group">
+                    <label>Subject</label>
+                    <select value={attendanceForm.subjectId} onChange={(e)=> setAttendanceForm(prev => ({ ...prev, subjectId: e.target.value }))}>
+                      <option value="">Select subject</option>
+                      {subjects.sort((a,b)=>a.subjectName.localeCompare(b.subjectName)).map(s => (
+                        <option key={s.id} value={s.id}>{s.subjectName}</option>
+                      ))}
+                    </select>
+                  </div>
                   {/* Date & Time */}
                   <div className="form-row">
                     <div className="form-group">
@@ -1548,7 +2069,7 @@ const Dashboard = () => {
 
                   <div className="modal-actions">
                     <button className="cancel-btn" onClick={() => setShowAttendanceModal(false)}>Cancel</button>
-                    <button className="save-btn" onClick={saveTeacherAttendance} disabled={!(attendanceForm.teacherId && attendanceForm.classId && attendanceForm.date && attendanceForm.time)}>Save Attendance</button>
+                    <button className="save-btn" onClick={saveTeacherAttendance} disabled={!(attendanceForm.teacherId && attendanceForm.classId && attendanceForm.subjectId && attendanceForm.date && attendanceForm.time)}>Save Attendance</button>
                   </div>
                 </>
               )}
